@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import CustomDropdown from "../components/common/CustomDropdown";
 import {
   AlertTriangle,
   Check,
@@ -36,6 +37,13 @@ const divisions = [
   { value: "BAVDHAN", label: "Bavdhan", id: "67dc1969a9ae16de2619b72f" },
   { value: "DEHUROAD", label: "Dehuroad", id: "67dc1a22a9ae16de2619b737" },
   { value: "TALEGAON", label: "Talegaon", id: "67dac3e9bb20f51c531c1509" },
+];
+
+const statusOptions = [
+  { value: "Pending", label: "Pending" },
+  { value: "In Progress", label: "Progress" },
+  { value: "Resolved", label: "Resolved" },
+  { value: "Rejected", label: "Rejected" },
 ];
 
 const AdminQueryManagementPage = () => {
@@ -107,6 +115,9 @@ const AdminQueryManagementPage = () => {
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false); // For voice recognition
+
+  // State for selected action in dropdown
+  const [selectedAction, setSelectedAction] = useState("");
 
   useEffect(() => {
     fetchQueryStats();
@@ -414,6 +425,7 @@ const AdminQueryManagementPage = () => {
   const closeDetails = () => {
     setViewDetailsId(null);
     setDetailsData(null);
+    setSelectedAction(""); // Reset selected action when closing
   };
 
   const downloadAsExcel = async () => {
@@ -632,6 +644,24 @@ const AdminQueryManagementPage = () => {
       setError(error.message || "Something went wrong. Please try again.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleActionChange = (e) => {
+    setSelectedAction(e.target.value);
+  };
+
+  const applyAction = () => {
+    if (!selectedAction) {
+      alert("Please select an action.");
+      return;
+    }
+    if (selectedAction === "Resolved") {
+      openResolveModal(detailsData);
+    } else if (selectedAction === "Forward to Department") {
+      sendEmail(detailsData);
+    } else if (selectedAction && selectedAction !== detailsData.status) {
+      updateQueryStatus(detailsData._id, selectedAction);
     }
   };
 
@@ -1170,13 +1200,20 @@ const AdminQueryManagementPage = () => {
                     <h3 className="text-sm font-medium text-gray-400">
                       Current Status:
                     </h3>
-                    <span
+                    {/* <span
                       className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getBadgeColor(
                         detailsData.status
                       )}`}
                     >
                       {detailsData.status}
-                    </span>
+                    </span> */}
+                   <div>
+                      <CustomDropdown
+                        value={selectedStatus}
+                        onChange={(value) => setSelectedStatus(value)}
+                        options={statusOptions}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1218,36 +1255,16 @@ const AdminQueryManagementPage = () => {
 
                 <div className="flex flex-wrap gap-3 mt-6">
                   <button
-                    className="bg-green-600 hover:bg-green-700 text-tBase px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => openResolveModal(detailsData)}
-                    disabled={detailsData.status === "Resolved"}
+                    className="bg-blue-600 hover:bg-blue-700 text-tBase px-4 py-2 rounded"
+                    onClick={applyAction}
                   >
-                    Mark as Resolved
+                    Apply Change
                   </button>
-
                   <button
-                    className="bg-blue-600 hover:bg-blue-700 text-tBase px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() =>
-                      updateQueryStatus(detailsData._id, "In Progress")
-                    }
-                    disabled={detailsData.status === "In Progress"}
-                  >
-                    Mark as In Progress
-                  </button>
-
-                  <button
-                    className="bg-yellow-600 hover:bg-yellow-700 text-tBase px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => updateQueryStatus(detailsData._id, "Pending")}
-                    disabled={detailsData.status === "Pending"}
-                  >
-                    Mark as Pending
-                  </button>
-
-                  <button
-                    className="bg-purple-600 hover:bg-purple-700 text-tBase px-4 py-2 rounded"
+                    className="bg-green-600 hover:bg-green-700 text-tBase px-4 py-2 rounded flex items-center"
                     onClick={() => sendEmail(detailsData)}
                   >
-                    Forward to Department
+                    <Mail size={16} className="mr-2" /> Forward to Department
                   </button>
                 </div>
               </div>

@@ -1,3 +1,5 @@
+// At the top of QueryManagementPage.jsx
+import CustomDropdown from "../components/common/CustomDropdown";
 import { useState, useEffect } from "react";
 import {
   AlertTriangle,
@@ -23,6 +25,13 @@ import QueryTrends from "../components/queries/QueryTrends";
 import { capitalize } from "@mui/material";
 
 const backendUrl = import.meta.env.VITE_Backend_URL || "http://localhost:3000";
+
+const statusOptions = [
+  { value: "Pending", label: "Pending" },
+  { value: "In Progress", label: "Progress" },
+  { value: "Resolved", label: "Resolved" },
+  { value: "Rejected", label: "Rejected" },
+];
 
 const divisions = [
   { value: "MAHALUNGE", label: "Mahalunge", id: "67dac1a2a771ed87f82890b2" },
@@ -101,16 +110,11 @@ const QueryManagementPage = () => {
   const [resolveModalOpen, setResolveModalOpen] = useState(false);
   const [selectedQueryForResolve, setSelectedQueryForResolve] = useState(null);
   const [message, setMessage] = useState("");
-  const [voiceText, setVoiceText] = useState("");
   const [image, setImage] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-
-  // Speech recognition states
-  const [isRecording, setIsRecording] = useState(false);
-  const [speechRecognition, setSpeechRecognition] = useState(null);
-  const [isSpeechSupported, setIsSpeechSupported] = useState(false);
+  const [isListening, setIsListening] = useState(false); // For voice recognition
 
   // Speech recognition initialization
   useEffect(() => {
@@ -134,23 +138,21 @@ const QueryManagementPage = () => {
           }
         }
 
-        setVoiceText((prev) => prev + finalTranscript);
+        setMessage((prev) => prev + finalTranscript);
       };
 
       recognition.onerror = (event) => {
         console.error("Speech recognition error:", event.error);
         setError("Speech recognition error: " + event.error);
-        setIsRecording(false);
+        setIsListening(false);
       };
 
       recognition.onend = () => {
-        setIsRecording(false);
+        setIsListening(false);
       };
 
-      setSpeechRecognition(recognition);
-      setIsSpeechSupported(true);
+      window.recognition = recognition; // Store globally to control it
     } else {
-      setIsSpeechSupported(false);
       console.warn("Speech Recognition API is not supported in this browser.");
     }
   }, []);
@@ -277,6 +279,7 @@ const QueryManagementPage = () => {
       if (response.data.success) {
         setDetailsData(response.data.data);
         setViewDetailsId(id);
+        setSelectedStatus(response.data.data.status); // Set initial status
       }
     } catch (error) {
       console.error("Error fetching query details:", error);
@@ -420,16 +423,17 @@ const QueryManagementPage = () => {
   const closeDetails = () => {
     setViewDetailsId(null);
     setDetailsData(null);
+    setSelectedStatus(""); // Reset selectedStatus when closing
   };
 
   const openResolveModal = (query) => {
     setSelectedQueryForResolve(query);
     setResolveModalOpen(true);
     setMessage("");
-    setVoiceText("");
     setImage(null);
     setError("");
     setSuccess("");
+    setIsListening(false);
   };
 
   const handleImageChange = (e) => {
@@ -437,18 +441,22 @@ const QueryManagementPage = () => {
     setImage(file);
   };
 
-  const toggleSpeechRecognition = () => {
-    if (!isSpeechSupported) {
+  const startListening = () => {
+    const recognition = window.recognition;
+    if (!recognition) {
       setError("Speech recognition is not supported in this browser.");
       return;
     }
 
-    if (isRecording) {
-      speechRecognition.stop();
-      setIsRecording(false);
-    } else {
-      speechRecognition.start();
-      setIsRecording(true);
+    recognition.start();
+    setIsListening(true);
+  };
+
+  const stopListening = () => {
+    const recognition = window.recognition;
+    if (recognition) {
+      recognition.stop();
+      setIsListening(false);
     }
   };
 
@@ -456,60 +464,39 @@ const QueryManagementPage = () => {
     e.preventDefault();
     setError("");
     setSuccess("");
-  
-    // Validate inputs
+
     if (message.trim() === "") {
       setError("Please provide resolution notes");
       return;
     }
-  
+
     setIsLoading(true);
-  
+
     try {
-      const adminUsername = userData?.username || "UnknownAdmin";
       const formData = new FormData();
-      formData.append("status", "Resolved"); // We're marking it as Resolved
-      formData.append("resolution_note", message); // Using message as resolution_note
-      if (image) formData.append("image", image); // Optional resolution image
-  
-      console.log("Submitting to:", `${backendUrl}/api/reports/${selectedQueryForResolve._id}/resolve`);
-      console.log("FormData contents:");
-      for (let [key, value] of formData.entries()) {
-        console.log(`${key}: ${value}`);
-      }
-  
+      formData.append("status", "Resolved");
+      formData.append("resolution_note", message);
+      if (image) formData.append("image", image);
+
       const response = await fetch(`${backendUrl}/api/reports/${selectedQueryForResolve._id}/resolve`, {
         method: "POST",
         body: formData,
       });
-  
-      // Log the raw response for debugging
-      const responseText = await response.text();
-      console.log("Raw response:", responseText);
-  
-      // Attempt to parse as JSON
-      let responseData;
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (jsonError) {
-        throw new Error(
-          `Server response is not valid JSON: ${responseText.substring(0, 100)}...`
-        );
-      }
-  
+
+      const responseData = await response.json();
+
       if (!response.ok) {
         throw new Error(responseData.message || `HTTP error! Status: ${response.status}`);
       }
-  
+
       if (responseData.success) {
         setSuccess("Report updated successfully!");
         setMessage("");
-        setVoiceText(""); // Clear voiceText if you're not using it
         setImage(null);
         setResolveModalOpen(false);
-        fetchQueries(); // Refresh the query list
+        fetchQueries();
         if (viewDetailsId === selectedQueryForResolve._id) {
-          fetchQueryDetails(selectedQueryForResolve._id); // Refresh details if open
+          fetchQueryDetails(selectedQueryForResolve._id);
         }
       } else {
         throw new Error(responseData.message || "Failed to update report");
@@ -521,6 +508,7 @@ const QueryManagementPage = () => {
       setIsLoading(false);
     }
   };
+
   const downloadAsExcel = async () => {
     setExportLoading(true);
     try {
@@ -605,12 +593,6 @@ const QueryManagementPage = () => {
               icon={FileSearch}
               value={filteredStats.total.toLocaleString()}
               color="#6366F1"
-            />
-            <StatCard
-              name="Pending Queries"
-              icon={Clock}
-              value={filteredStats.byStatus?.pending || 0}
-              color="#F59E0B"
             />
             <StatCard
               name="In Progress"
@@ -916,11 +898,10 @@ const QueryManagementPage = () => {
                   <button
                     onClick={() => setCurrentPage((c) => Math.max(c - 1, 1))}
                     disabled={currentPage === 1}
-                    className={`px-4 py-2 rounded-md ${
-                      currentPage === 1
-                        ? "bg-bgSecondary text-gray-500 cursor-not-allowed"
-                        : "bg-blue-600 text-tBase hover:bg-blue-700"
-                    }`}
+                    className={`px-4 py-2 rounded-md ${currentPage === 1
+                      ? "bg-bgSecondary text-gray-500 cursor-not-allowed"
+                      : "bg-blue-600 text-tBase hover:bg-blue-700"
+                      }`}
                   >
                     Previous
                   </button>
@@ -929,11 +910,10 @@ const QueryManagementPage = () => {
                       setCurrentPage((c) => (c < totalPages ? c + 1 : c))
                     }
                     disabled={currentPage === totalPages}
-                    className={`px-4 py-2 rounded-md ${
-                      currentPage === totalPages
-                        ? "bg-bgSecondary text-gray-500 cursor-not-allowed"
-                        : "bg-blue-600 text-tBase hover:bg-blue-700"
-                    }`}
+                    className={`px-4 py-2 rounded-md ${currentPage === totalPages
+                      ? "bg-bgSecondary text-gray-500 cursor-not-allowed"
+                      : "bg-blue-600 text-tBase hover:bg-blue-700"
+                      }`}
                   >
                     Next
                   </button>
@@ -1017,13 +997,20 @@ const QueryManagementPage = () => {
                     <h3 className="text-sm font-medium text-gray-400">
                       Current Status:
                     </h3>
-                    <span
+                    {/* <span
                       className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getBadgeColor(
                         detailsData.status
                       )}`}
                     >
                       {detailsData.status}
-                    </span>
+                    </span> */}
+                    <div>
+                      <CustomDropdown
+                        value={selectedStatus}
+                        onChange={(value) => setSelectedStatus(value)}
+                        options={statusOptions}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1061,36 +1048,23 @@ const QueryManagementPage = () => {
 
                 <div className="flex flex-wrap gap-3 mt-6">
                   <button
-                    className="bg-green-600 hover:bg-green-700 text-tBase px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => openResolveModal(detailsData)}
-                    disabled={detailsData.status === "Resolved"}
-                  >
-                    Mark as Resolved
-                  </button>
-
-                  <button
                     className="bg-blue-600 hover:bg-blue-700 text-tBase px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() =>
-                      updateQueryStatus(detailsData._id, "In Progress")
-                    }
-                    disabled={detailsData.status === "In Progress"}
+                    onClick={() => {
+                      if (selectedStatus === "Resolved") {
+                        openResolveModal(detailsData);
+                      } else if (selectedStatus && selectedStatus !== detailsData.status) {
+                        updateQueryStatus(detailsData._id, selectedStatus);
+                      }
+                    }}
+                    disabled={!selectedStatus || selectedStatus === detailsData.status}
                   >
-                    Mark as In Progress
+                    Apply Changes
                   </button>
-
                   <button
-                    className="bg-yellow-600 hover:bg-yellow-700 text-tBase px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => updateQueryStatus(detailsData._id, "Pending")}
-                    disabled={detailsData.status === "Pending"}
-                  >
-                    Mark as Pending
-                  </button>
-
-                  <button
-                    className="bg-purple-600 hover:bg-purple-700 text-tBase px-4 py-2 rounded"
+                    className="bg-green-600 hover:bg-green-700 text-tBase px-4 py-2 rounded flex items-center"
                     onClick={() => sendEmail(detailsData)}
                   >
-                    Forward to Department
+                    <Mail size={16} className="mr-2" /> Forward to Department
                   </button>
                 </div>
               </div>
@@ -1192,18 +1166,21 @@ const QueryManagementPage = () => {
               exit={{ opacity: 0, scale: 0.9 }}
             >
               <div className="flex justify-between items-start mb-4">
-                <h2 className="text-xl font-semibold text-tBase">Submit Response</h2>
+                <h2 className="text-xl font-semibold text-tBase">Resolve Query</h2>
                 <button
                   className="text-gray-400 hover:text-tBase"
-                  onClick={() => setResolveModalOpen(false)}
+                  onClick={() => {
+                    stopListening();
+                    setResolveModalOpen(false);
+                  }}
                 >
                   Close
                 </button>
               </div>
 
               <div className="text-center mb-4">
-                <h3 className="text-lg font-medium text-tBase">Resolve Query</h3>
-                <p className="text-sm text-gray-400">Fill in the details to submit a response</p>
+                <h3 className="text-lg font-medium text-tBase">Submit Resolution</h3>
+                <p className="text-sm text-gray-400">Provide details to mark this query as resolved</p>
               </div>
 
               <form className="space-y-6" onSubmit={handleResolveSubmit}>
@@ -1261,66 +1238,42 @@ const QueryManagementPage = () => {
                       htmlFor="message"
                       className="block text-sm font-medium text-gray-400 mb-1"
                     >
-                      Message
-                    </label>
-                    <textarea
-                      id="message"
-                      name="message"
-                      required
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      className="appearance-none relative block w-full px-3 py-3 border border-gray-700 bg-bgSecondary text-tBase placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-secondary sm:text-sm"
-                      placeholder="Enter your message"
-                      disabled={isLoading}
-                      rows="4"
-                    />
-                  </div>
-                  <div className="mb-5">
-                    <label
-                      htmlFor="voiceText"
-                      className="block text-sm font-medium text-gray-400 mb-1"
-                    >
-                      Voice Text
+                      Resolution Notes
                     </label>
                     <div className="relative">
                       <textarea
-                        id="voiceText"
-                        name="voiceText"
+                        id="message"
+                        name="message"
                         required
-                        value={voiceText}
-                        onChange={(e) => setVoiceText(e.target.value)}
-                        className="appearance-none relative block w-full px-3 py-3 border border-gray-700 bg-bgSecondary text-tBase placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-secondary sm:text-sm pr-12"
-                        placeholder="Enter voice text or use the microphone"
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        className="appearance-none relative block w-full px-3 py-3 border border-gray-700 bg-bgSecondary text-tBase placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-secondary sm:text-sm"
+                        placeholder="Enter resolution details or use voice input"
                         disabled={isLoading}
                         rows="4"
                       />
                       <button
                         type="button"
-                        onClick={toggleSpeechRecognition}
-                        disabled={isLoading || !isSpeechSupported}
-                        className={`absolute right-3 top-3 p-2 rounded-full ${
-                          isRecording
-                            ? "bg-red-600 hover:bg-red-700"
-                            : "bg-blue-600 hover:bg-blue-700"
-                        } text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150`}
-                        title={
-                          isSpeechSupported
-                            ? isRecording
-                              ? "Stop Recording"
-                              : "Start Recording"
-                            : "Speech recognition not supported"
-                        }
+                        onClick={isListening ? stopListening : startListening}
+                        disabled={isLoading}
+                        className={`absolute right-2 top-2 p-2 rounded-full ${isListening
+                          ? "bg-red-600 hover:bg-red-700"
+                          : "bg-blue-600 hover:bg-blue-700"
+                          } text-tBase focus:outline-none focus:ring-2 focus:ring-secondary`}
                       >
-                        <Mic size={18} className={isRecording ? "animate-pulse" : ""} />
+                        <Mic size={20} />
                       </button>
                     </div>
+                    {isListening && (
+                      <p className="text-sm text-blue-400 mt-1">Listening...</p>
+                    )}
                   </div>
                   <div className="mb-5">
                     <label
                       htmlFor="image"
                       className="block text-sm font-medium text-gray-400 mb-1"
                     >
-                      Image (Optional)
+                      Resolution Image (Optional)
                     </label>
                     <input
                       id="image"
@@ -1338,11 +1291,10 @@ const QueryManagementPage = () => {
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-tBase ${
-                      isLoading
-                        ? "bg-blue-400 cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary"
-                    } transition-colors duration-150`}
+                    className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-tBase ${isLoading
+                      ? "bg-blue-400 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary"
+                      } transition-colors duration-150`}
                   >
                     {isLoading ? (
                       <>
@@ -1369,7 +1321,7 @@ const QueryManagementPage = () => {
                         Submitting...
                       </>
                     ) : (
-                      "Submit Response"
+                      "Submit Resolution"
                     )}
                   </button>
                 </div>
